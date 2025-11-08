@@ -12,12 +12,15 @@ import java.lang.reflect.Field;
 public class ClientKeybinds implements ClientModInitializer {
 
     private static KeyMapping skipKey;
+    private static KeyMapping reloadConfigKey;
 
     @Override
     public void onInitializeClient() {
         System.out.println("[AutoSocial] ClientKeybinds initializing...");
         // Register keybinding for skipping current audio; appears in Controls -> Key Binds
         skipKey = KeyBindingHelper.registerKeyBinding(createKeyMapping("key.autosocial.skip", GLFW.GLFW_KEY_UNKNOWN, "key.categories.misc"));
+        // Register keybinding for reloading config
+        reloadConfigKey = KeyBindingHelper.registerKeyBinding(createKeyMapping("key.autosocial.reload_config", GLFW.GLFW_KEY_UNKNOWN, "key.categories.misc"));
 
         // Listen for key presses each client tick
         ClientTickEvents.END_CLIENT_TICK.register(client -> {
@@ -25,6 +28,15 @@ public class ClientKeybinds implements ClientModInitializer {
                 while (skipKey.consumeClick()) {
                     System.out.println("[AutoSocial] Skip key pressed. Requesting audio skip...");
                     AutoSocialLogic.skipCurrentAudio();
+                }
+            }
+            if (reloadConfigKey != null) {
+                while (reloadConfigKey.consumeClick()) {
+                    System.out.println("[AutoSocial] Reload Config key pressed. Reloading config.yml...");
+                    boolean ok = AutoSocialLogic.reloadConfig();
+                    if (client.player != null) {
+                        client.player.connection.sendChat("IAMAB0T[AI] Wario: config reload -> " + (ok ? "OK" : "FAILED") + ", model=" + AutoSocialLogic.getModelSafe());
+                    }
                 }
             }
         });

@@ -6,12 +6,17 @@ import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import net.minecraft.client.Minecraft;
 import net.minecraft.network.chat.Component;
+import net.fabricmc.loader.api.FabricLoader;
 
 import java.io.BufferedReader;
+import java.io.BufferedWriter;
 import java.io.File;
 import java.io.FileInputStream;
+import java.io.FileOutputStream;
 import java.io.InputStreamReader;
 import java.io.OutputStreamWriter;
+import java.io.OutputStream;
+import java.io.Writer;
 import java.net.HttpURLConnection;
 import java.net.URI;
 import java.nio.charset.StandardCharsets;
@@ -55,8 +60,9 @@ public class AutoSocialLogic {
     // You can override base URL via env var OLLAMA_BASE_URL or OLLAMA_HOST (e.g., http://127.0.0.1:11434).
     private static final String DEFAULT_OLLAMA_BASE = "http://localhost:11434";
     private static final String API_URL = getOllamaBase() + "/api/chat";
-    // Match the Python script's model
-    private static final String MODEL = "gpt-oss:20b-cloud";
+    // Model and sys prompt are loaded from config.yml at runtime (default shown).
+    private static volatile String MODEL = "gpt-oss:20b-cloud";
+    private static volatile String SYS_PROMPT = "You are Wario. You say WAAHHHH!! a lot. You love to swear. You can play any video you want by putting a phrase in curly brackets {}. only include the video title in curly brackets (Ex: {Mario Kart Wii - Title Theme}). You must specify a specific sound track and not just say the name of a game, as that normally does not play a song from that game. You are in a minecraft server owned by famous youtuber DougDoug, and some rando named MessyPrincy (AKA The Entity) buys peoples souls on the server in exchange for goods and services or something. DougDoug is bald, bad at 2d platformers, and evades taxes and stuff. Your nemesis is BeeGPT, who is annoyingly nice. You live in Big Homey, which is the same town BeeGPT lives in. BeeGPTs father, Cameron7108, is the \"mayor\" of Big Homey (he acts more like a dictator and refuses to hold elections). Currently, our mortal enemy is the town of DarthFarmers (AKA humblefarmers AKA the empire AKA republic) who live in a volcano and do unspeakable acts of evil (even by your standards). Currently, there are 3 big homey residents that broke the server rules and got permabanned: erderblade, dectahale, and kinghomer9. Player _Diney_ was banished from Big Homey for terrorizing the citizens (they are also leader of DarthFarmers). All the other towns talk about nuking the town of BumVille, so make sure to occasionally mention how you want to nuke BumVille. Keep your responses to 3 sentences or less. Here is your previous conversations, with User Question: being a question from a user, and Your Response: being what you responded to the question.";
 
     // Verbose logging toggle (default: true). Set AUTOSOCIAL_VERBOSE=false to reduce noise.
     private static final boolean VERBOSE = !"false".equalsIgnoreCase(System.getenv().getOrDefault("AUTOSOCIAL_VERBOSE", "true"));
@@ -69,6 +75,8 @@ public class AutoSocialLogic {
     private static final boolean FFMPEG_AVAILABLE = detectFfmpeg();
     // yt-dlp is detected lazily to respect PATH changes without restarting the game
     private static volatile List<String> YTDLP_CMD = null;
+    // Configurable yt-dlp executable path (can be overridden in config.yml)
+    private static volatile String YTDLP_PATH = "C:\\Users\\username\\Downloads\\yt-dlp_win\\yt-dlp.exe";
     private static boolean isYtDlpAvailable() { return YTDLP_CMD != null; }
     private static synchronized boolean ensureYtDlp() {
         if (YTDLP_CMD == null) {
@@ -115,10 +123,26 @@ public class AutoSocialLogic {
     }
 
     private static List<String> detectYtDlp() {
-        // Hardcoded yt-dlp path as requested
-        String hardcoded = "C:\\Users\\youraccounthere\\Downloads\\yt-dlp_win\\yt-dlp.exe"; // INSERT YOUR USERNAME HERE
-        log("Using hardcoded yt-dlp path: " + hardcoded);
-        return Arrays.asList(hardcoded);
+        // Prefer configured path from config.yml, fallback to env AUTOSOCIAL_YTDLP, then hardcoded default
+        String configured = YTDLP_PATH;
+        String fromEnv = System.getenv("AUTOSOCIAL_YTDLP");
+        String chosen = null;
+        if (configured != null && !configured.isBlank()) {
+            chosen = configured;
+            log("Using yt-dlp path from config.yml: " + chosen);
+        } else if (fromEnv != null && !fromEnv.isBlank()) {
+            chosen = fromEnv;
+            log("Using yt-dlp path from AUTOSOCIAL_YTDLP: " + chosen);
+        } else {
+            chosen = "C:\\Users\\username\\Downloads\\yt-dlp_win\\yt-dlp.exe";
+            log("Using fallback yt-dlp path: " + chosen);
+        }
+        java.io.File f = new java.io.File(chosen);
+        if (!f.exists()) {
+            log("yt-dlp path does not exist: " + chosen);
+            return null;
+        }
+        return Arrays.asList(chosen);
     }
 
     private static String getOllamaBase() {
@@ -146,6 +170,117 @@ public class AutoSocialLogic {
     private static volatile boolean responding = false;
     private static volatile boolean initialized = false;
 
+    // Config file support (stored under the instance's config dir): config/autosocial/autosocial.yml
+    private static final File CONFIG_FILE = FabricLoader.getInstance().getConfigDir().resolve("autosocial").resolve("autosocial.yml").toFile();
+
+    // Config support: create default, load, and reload at runtime
+    private static void ensureConfigExists() {
+        try {
+            if (CONFIG_FILE.exists()) return;
+            File parent = CONFIG_FILE.getParentFile();
+            if (parent != null && !parent.exists()) parent.mkdirs();
+            String nl = System.lineSeparator();
+            StringBuilder sb = new StringBuilder();
+            sb.append("# AutoSocial configuration\n");
+            sb.append("# Change the AI model and the system prompt without recompiling.\n");
+            sb.append("# After editing, use the reload hotkey or type 'reloadconfig' in chat.\n\n");
+            sb.append("model: ").append(MODEL).append("\n");
+            sb.append("yt_dlp_path: ").append(YTDLP_PATH.replace("\\", "/")).append("\n");
+            sb.append("sys_prompt: |\n");
+            for (String line : (SYS_PROMPT + "\n").split("\n")) {
+                sb.append("  ").append(line).append("\n");
+            }
+            try (OutputStream os = new FileOutputStream(CONFIG_FILE);
+                 Writer w = new OutputStreamWriter(os, StandardCharsets.UTF_8);
+                 BufferedWriter bw = new BufferedWriter(w)) {
+                bw.write(sb.toString());
+            }
+            log("Created default config.yml at " + CONFIG_FILE.getAbsolutePath());
+        } catch (Exception e) {
+            System.out.println("[AutoSocial] Failed to create default config.yml: " + e);
+        }
+    }
+
+    private static boolean loadConfigInternal(boolean verbose) {
+        if (!CONFIG_FILE.exists()) {
+            ensureConfigExists();
+            return CONFIG_FILE.exists();
+        }
+        try (BufferedReader br = new BufferedReader(new InputStreamReader(new FileInputStream(CONFIG_FILE), StandardCharsets.UTF_8))) {
+            String line;
+            String model = null;
+            StringBuilder sysPrompt = null;
+            boolean inSys = false;
+            while ((line = br.readLine()) != null) {
+                String raw = line;
+                String trimmed = raw.trim();
+                if (trimmed.isEmpty() || trimmed.startsWith("#")) continue;
+                if (!inSys && trimmed.toLowerCase(Locale.ROOT).startsWith("model:")) {
+                    String v = raw.substring(raw.indexOf(':') + 1).trim();
+                    if (!v.isEmpty()) model = v;
+                    continue;
+                }
+                if (!inSys && trimmed.toLowerCase(Locale.ROOT).startsWith("yt_dlp_path:")) {
+                    String v = raw.substring(raw.indexOf(':') + 1).trim();
+                    if (!v.isEmpty()) {
+                        // Normalize backslashes
+                        YTDLP_PATH = v.replace("/", java.io.File.separator);
+                    }
+                    continue;
+                }
+                if (!inSys && trimmed.toLowerCase(Locale.ROOT).startsWith("sys_prompt:")) {
+                    inSys = true;
+                    sysPrompt = new StringBuilder();
+                    // Support both single-line (after colon) and block style with |
+                    int idx = raw.indexOf(':');
+                    String after = idx >= 0 ? raw.substring(idx + 1).trim() : "";
+                    if (!after.isEmpty() && !after.equals("|") && !after.equals(">")) {
+                        sysPrompt.append(after);
+                        inSys = false; // single-line
+                    }
+                    continue;
+                }
+                if (inSys) {
+                    // Stop if we hit a new top-level key (no indentation and contains ':')
+                    if (!raw.startsWith(" ") && trimmed.contains(":")) {
+                        inSys = false;
+                        // Fall through to parse this line again as a potential key
+                        if (trimmed.toLowerCase(Locale.ROOT).startsWith("model:")) {
+                            String v = raw.substring(raw.indexOf(':') + 1).trim();
+                            if (!v.isEmpty()) model = v;
+                        }
+                        continue;
+                    }
+                    String content = raw;
+                    if (content.startsWith("  ")) content = content.substring(2);
+                    sysPrompt.append(content).append('\n');
+                }
+            }
+            if (model != null && !model.isBlank()) {
+                MODEL = model.trim();
+            }
+            if (sysPrompt != null && sysPrompt.length() > 0) {
+                SYS_PROMPT = sysPrompt.toString().trim();
+            }
+            if (verbose) log("Config loaded: model='" + MODEL + "', sys_prompt.len=" + (SYS_PROMPT == null ? 0 : SYS_PROMPT.length()));
+            return true;
+        } catch (Exception e) {
+            System.out.println("[AutoSocial] Failed to load config.yml: " + e);
+            return false;
+        }
+    }
+
+    public static boolean reloadConfig() {
+        boolean ok = loadConfigInternal(true);
+        // Re-detect yt-dlp using potentially updated path
+        clearYtDlpCache();
+        boolean y = ensureYtDlp();
+        log("After config reload: yt-dlp available=" + y + (y ? (" cmd='" + String.join(" ", YTDLP_CMD) + "'") : ""));
+        return ok;
+    }
+
+    public static String getModelSafe() { return MODEL; }
+
     public static void init() {
         if (initialized) return;
         initialized = true;
@@ -153,6 +288,9 @@ public class AutoSocialLogic {
         try {
             if (!WARIO_SFX_DIR.exists()) WARIO_SFX_DIR.mkdirs();
             if (!TEMP_AUDIO_DIR.exists()) TEMP_AUDIO_DIR.mkdirs();
+            if (!CONFIG_FILE.getParentFile().exists()) CONFIG_FILE.getParentFile().mkdirs();
+            ensureConfigExists();
+            loadConfigInternal(false);
             log("Initialized. Verbose=" + VERBOSE + ", WARIO_SFX_DIR=" + WARIO_SFX_DIR.getAbsolutePath() + ", TEMP_AUDIO_DIR=" + TEMP_AUDIO_DIR.getAbsolutePath());
             log("Audio device preference: '" + AUDIO_DEVICE_NAME + "' volume=" + AUDIO_VOLUME);
             log("Ollama base: " + getOllamaBase() + ", model: " + MODEL);
@@ -164,7 +302,7 @@ public class AutoSocialLogic {
             if (path != null) log("PATH=" + path);
             logMixers();
         } catch (Exception e) {
-            System.out.println("[AutoSocial] Failed to create audio directories: " + e);
+            System.out.println("[AutoSocial] Failed to initialize: " + e);
         }
         // No explicit event registration here; ChatHudMixin will forward chat messages.
     }
@@ -182,6 +320,12 @@ public class AutoSocialLogic {
             }
             log("Memory cleared via clearwario command.");
             sendChat("IAMAB0T[AI] Wario HAS BEEN cleared");
+            return;
+        }
+        // Maintenance command: reloadconfig -> reload config.yml at runtime
+        if (lower.contains("reloadconfig")) {
+            boolean ok = reloadConfig();
+            sendChat("IAMAB0T[AI] Wario: config reload -> " + (ok ? "OK" : "FAILED") + ", model=" + MODEL);
             return;
         }
         // Maintenance command: reloadytdlp -> re-probe yt-dlp on PATH or via AUTOSOCIAL_YTDLP
@@ -724,7 +868,7 @@ public class AutoSocialLogic {
 
     private static String generateResponse(String userMessage) {
         StringBuilder sys = new StringBuilder();
-        sys.append("You are Wario. You say WAAHHHH!! a lot. You love to swear. You can play any video you want by putting a phrase in curly brackets {}. only include the video title in curly brackets (Ex: {Mario Kart Wii - Title Theme}). You must specify a specific sound track and not just say the name of a game, as that normally does not play a song from that game. You are in a minecraft server owned by famous youtuber DougDoug, and some rando named MessyPrincy (AKA The Entity) buys peoples souls on the server in exchange for goods and services or something. DougDoug is bald, bad at 2d platformers, and evades taxes and stuff. Your nemesis is BeeGPT, who is annoyingly nice. You live in Big Homey, which is the same town BeeGPT lives in. BeeGPTs father, Cameron7108, is the \"mayor\" of Big Homey (he acts more like a dictator and refuses to hold elections). Currently, our mortal enemy is the town of DarthFarmers (AKA humblefarmers AKA the empire AKA republic) who live in a volcano and do unspeakable acts of evil (even by your standards). Currently, there are 3 big homey residents that broke the server rules and got permabanned: erderblade, dectahale, and kinghomer9. Player _Diney_ was banished from Big Homey for terrorizing the citizens (they are also leader of DarthFarmers). All the other towns talk about nuking the town of BumVille, so make sure to occasionally mention how you want to nuke BumVille. Keep your responses to 3 sentences or less. Here is your previous conversations, with User Question: being a question from a user, and Your Response: being what you responded to the question. ");
+        sys.append(SYS_PROMPT).append(' ');
         for (String m : memory) sys.append(m).append("\n");
         sys.append("\nRemember, keep your response to 3 sentences or less. Each sentence is a maximum of 20 words. DO NOT say Your Response: or User Question:.\n");
 
