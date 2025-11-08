@@ -1,4 +1,4 @@
-package com.example;
+package com.jbm11208.autosocial;
 
 import net.fabricmc.api.ModInitializer;
 
