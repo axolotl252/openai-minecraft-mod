@@ -8,6 +8,8 @@ import net.minecraft.client.Minecraft;
 import net.minecraft.network.chat.Component;
 import net.fabricmc.loader.api.FabricLoader;
 
+import com.google.genai.Client; // gemini
+import com.google.genai.types.GenerateContentResponse; // gemini
 import java.io.BufferedReader;
 import java.io.BufferedWriter;
 import java.io.File;
@@ -58,11 +60,12 @@ public class AutoSocialLogic {
     private static final float AUDIO_VOLUME = parseFloatEnv("AUTOSOCIAL_VOLUME", 0.2f);
     // Ollama local endpoint. Ensure Ollama is running (default: http://localhost:11434).
     // You can override base URL via env var OLLAMA_BASE_URL or OLLAMA_HOST (e.g., http://127.0.0.1:11434).
-    private static final String DEFAULT_OLLAMA_BASE = "http://localhost:11434";
-    private static final String API_URL = getOllamaBase() + "/api/chat";
+    // private static final String DEFAULT_OLLAMA_BASE = "http://localhost:11434";
+    // private static final String API_URL = getOllamaBase() + "/api/chat";
     // Model and sys prompt are loaded from config.yml at runtime (default shown).
-    private static volatile String MODEL = "gpt-oss:20b-cloud";
-    private static volatile String SYS_PROMPT = "You are Wario. You say WAAHHHH!! a lot. You love to swear. You can play any video you want by putting a phrase in curly brackets {}. only include the video title in curly brackets (Ex: {Mario Kart Wii - Title Theme}). You must specify a specific sound track and not just say the name of a game, as that normally does not play a song from that game. You are in a minecraft server owned by famous youtuber DougDoug, and some rando named MessyPrincy (AKA The Entity) buys peoples souls on the server in exchange for goods and services or something. DougDoug is bald, bad at 2d platformers, and evades taxes and stuff. Your nemesis is BeeGPT, who is annoyingly nice. You live in Big Homey, which is the same town BeeGPT lives in. BeeGPTs father, Cameron7108, is the \"mayor\" of Big Homey (he acts more like a dictator and refuses to hold elections). Currently, our mortal enemy is the town of DarthFarmers (AKA humblefarmers AKA the empire AKA republic) who live in a volcano and do unspeakable acts of evil (even by your standards). Currently, there are 3 big homey residents that broke the server rules and got permabanned: erderblade, dectahale, and kinghomer9. Player _Diney_ was banished from Big Homey for terrorizing the citizens (they are also leader of DarthFarmers). All the other towns talk about nuking the town of BumVille, so make sure to occasionally mention how you want to nuke BumVille. Keep your responses to 3 sentences or less. Here is your previous conversations, with User Question: being a question from a user, and Your Response: being what you responded to the question.";
+    // private static volatile String MODEL = "gpt-oss:20b-cloud"; // shouldnt be needed but im leaving it so i can refernce it
+    // private static volatile String SYS_PROMPT = "You are Wario. You say WAAHHHH!! a lot. You love to swear. You can play any video you want by putting a phrase in curly brackets {}. only include the video title in curly brackets (Ex: {Mario Kart Wii - Title Theme}). You must specify a specific sound track and not just say the name of a game, as that normally does not play a song from that game. You are in a minecraft server owned by famous youtuber DougDoug, and some rando named MessyPrincy (AKA The Entity) buys peoples souls on the server in exchange for goods and services or something. DougDoug is bald, bad at 2d platformers, and evades taxes and stuff. Your nemesis is BeeGPT, who is annoyingly nice. You live in Big Homey, which is the same town BeeGPT lives in. BeeGPTs father, Cameron7108, is the \"mayor\" of Big Homey (he acts more like a dictator and refuses to hold elections). Currently, our mortal enemy is the town of DarthFarmers (AKA humblefarmers AKA the empire AKA republic) who live in a volcano and do unspeakable acts of evil (even by your standards). Currently, there are 3 big homey residents that broke the server rules and got permabanned: erderblade, dectahale, and kinghomer9. Player _Diney_ was banished from Big Homey for terrorizing the citizens (they are also leader of DarthFarmers). All the other towns talk about nuking the town of BumVille, so make sure to occasionally mention how you want to nuke BumVille. Keep your responses to 3 sentences or less. Here is your previous conversations, with User Question: being a question from a user, and Your Response: being what you responded to the question.";
+    private static volatile String SYS_PROMPT = "PROMT goes here";
 
     // Verbose logging toggle (default: true). Set AUTOSOCIAL_VERBOSE=false to reduce noise.
     private static final boolean VERBOSE = !"false".equalsIgnoreCase(System.getenv().getOrDefault("AUTOSOCIAL_VERBOSE", "true"));
@@ -145,7 +148,7 @@ public class AutoSocialLogic {
         return Arrays.asList(chosen);
     }
 
-    private static String getOllamaBase() {
+    private static String getOllamaBase() { // should come in handy, keep it
         String base = System.getenv("OLLAMA_BASE_URL");
         if (base == null || base.isBlank()) base = System.getenv("OLLAMA_HOST");
         if (base == null || base.isBlank()) base = DEFAULT_OLLAMA_BASE;
@@ -162,8 +165,8 @@ public class AutoSocialLogic {
     });
 
     // Basic config adapted from the Python script behavior
-    private static final List<String> KEYWORDS = List.of("wario");
-    private static final String USERNAME = "Wario";
+    private static final List<String> KEYWORDS = List.of("Im_An_Axobotl", "axogpt");
+    private static final String USERNAME = "Im_An_Axobotl";
     private static final int MEMORY_LIMIT = 10; // number of alternating lines to remember
 
     private static final Deque<String> memory = new ArrayDeque<>();
